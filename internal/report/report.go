@@ -33,8 +33,8 @@ func printTable(res *compare.Result, out io.Writer) error {
 		res.Summary.Breaking, res.Summary.PotentialBreaking, res.Summary.Info)
 
 	if len(res.Changes) == 0 {
-		fmt.Fprintf(out, "No contract drift detected. Response matches approved baseline perfectly!\n")
-		return nil
+		fmt.Fprintf(w, "No contract drift detected. Response matches approved baseline perfectly!\n")
+		return w.Flush()
 	}
 
 	fmt.Fprintf(w, "SEVERITY\tPATH\tBEFORE\tAFTER\tREASON\n")

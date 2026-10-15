@@ -194,6 +194,14 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		}
 		return ExitUsage
 	}
+	if !isValidFormat(*format) {
+		fmt.Fprintf(stderr, "contractpeek check: invalid --format value %q (must be 'table', 'json', or 'markdown')\n", *format)
+		return ExitUsage
+	}
+	if *failOn != "" && !isValidFailOn(*failOn) {
+		fmt.Fprintf(stderr, "contractpeek check: invalid --fail-on value %q (must be 'breaking', 'potential_breaking', or 'none')\n", *failOn)
+		return ExitUsage
+	}
 
 	if *name == "" {
 		fmt.Fprintln(stderr, "contractpeek check: --name flag is required")
@@ -282,11 +290,15 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 	subCmd := args[0]
 	subArgs := args[1:]
 
+	if subCmd == "-h" || subCmd == "--help" || subCmd == "help" {
+		fmt.Fprintln(stdout, "Usage: contractpeek baseline update --name <name> --file <sample.json> --approve")
+		return ExitSuccess
+	}
+
 	if subCmd != "update" {
 		fmt.Fprintf(stderr, "contractpeek baseline: unknown subcommand %q\n", subCmd)
 		return ExitUsage
 	}
-
 	fs := flag.NewFlagSet("baseline update", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -350,12 +362,20 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 }
 
 func runList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitSuccess
+		}
+		return ExitUsage
+	}
+
 	store, err := baseline.NewStore(".")
 	if err != nil {
 		fmt.Fprintf(stderr, "contractpeek list: %v\n", err)
 		return ExitUsage
 	}
-
 	names, err := store.List()
 	if err != nil {
 		fmt.Fprintf(stderr, "contractpeek list: %v\n", err)
@@ -392,6 +412,10 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitSuccess
 		}
+		return ExitUsage
+	}
+	if !isValidFormat(*format) {
+		fmt.Fprintf(stderr, "contractpeek diff: invalid --format value %q (must be 'table', 'json', or 'markdown')\n", *format)
 		return ExitUsage
 	}
 

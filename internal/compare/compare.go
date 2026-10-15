@@ -145,8 +145,27 @@ func Compare(contractName string, base *baseline.Baseline, current *shape.Inferr
 			})
 		}
 	}
+	// 2. Check declared required paths missing from current sample (even if not in baseline)
+	for rp := range requiredSet {
+		if isIgnored(rp, opts.IgnoredPaths) {
+			continue
+		}
+		if _, inBase := baseMap[rp]; inBase {
+			continue // Already evaluated in baseMap iteration
+		}
+		if _, inCurr := currMap[rp]; !inCurr {
+			res.Changes = append(res.Changes, Change{
+				Path:        rp,
+				Kind:        KindRequiredPathMissing,
+				Severity:    SeverityBreaking,
+				BeforeTypes: []string{},
+				AfterTypes:  []string{},
+				Reason:      "Declared required path was not observed in current response",
+			})
+		}
+	}
 
-	// 2. Check newly added fields in current observations
+	// 3. Check newly added fields in current observations
 	for path, currField := range currMap {
 		if _, exists := baseMap[path]; !exists {
 			res.Changes = append(res.Changes, Change{
@@ -199,14 +218,32 @@ func isIgnored(path string, ignoredPaths []string) bool {
 
 func isArrayItemDescendant(path string, currMap map[string]shape.FieldInfo) bool {
 	lastStarIdx := strings.LastIndex(path, "/*")
-	if lastStarIdx != -1 {
-		itemPath := path[:lastStarIdx+2] // e.g. "#/data/items/*"
-		// If the array item itself was not observed in currMap, the array was empty in sample
-		if _, ok := currMap[itemPath]; !ok {
-			return true
+	if lastStarIdx == -1 {
+		return false
+	}
+	parentArrayPath := path[:lastStarIdx]
+	itemPath := path[:lastStarIdx+2]
+
+	// 1. Verify parent array was actually observed as an array in current sample
+	arr, hasArray := currMap[parentArrayPath]
+	if !hasArray {
+		return false // Parent array itself was deleted/absent -> not merely an empty array
+	}
+	isArr := false
+	for _, t := range arr.Types {
+		if t == "array" {
+			isArr = true
+			break
 		}
 	}
-	return false
+	if !isArr {
+		return false // Parent changed type away from array
+	}
+
+	// 2. If parent was observed as array, but items were unobserved (i.e. empty array `[]`),
+	// then the item wildcard was unobservable
+	_, hasItems := currMap[itemPath]
+	return !hasItems
 }
 
 func typeSetsMatch(a, b []string) bool {

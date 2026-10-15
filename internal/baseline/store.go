@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,14 +14,18 @@ import (
 	"github.com/farulwananda/contractpeek/internal/shape"
 )
 
+// MaxBaselineBytes is the maximum allowed file size for reading baseline and config JSON (10 MiB).
+const MaxBaselineBytes = 10 * 1024 * 1024
+
 var validNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // ValidateName ensures baseline names prevent path traversal and follow strict alphanumeric conventions.
 func ValidateName(name string) error {
-	if name == "" {
+	normalized := strings.ToLower(name)
+	if normalized == "" {
 		return errors.New("contract baseline name cannot be empty")
 	}
-	if !validNameRegex.MatchString(name) {
+	if !validNameRegex.MatchString(normalized) {
 		return fmt.Errorf("invalid contract baseline name %q: must match ^[a-z0-9][a-z0-9_-]{0,63}$", name)
 	}
 	return nil
@@ -151,11 +156,27 @@ func (s *Store) SaveBaseline(name string, contract *shape.InferredContract, over
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}
-
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		return fmt.Errorf("failed replacing baseline file: %w", err)
+	if !overwrite {
+		// Use os.Link for atomic non-overwriting creation
+		if err := os.Link(tmpPath, finalPath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("contract baseline %q already exists; use 'baseline update --name %s --approve' to update", name, name)
+			}
+			// Fallback on filesystems that don't support hard links
+			if _, statErr := os.Stat(finalPath); statErr == nil {
+				return fmt.Errorf("contract baseline %q already exists; use 'baseline update --name %s --approve' to update", name, name)
+			}
+			if err := os.Rename(tmpPath, finalPath); err != nil {
+				return fmt.Errorf("failed saving baseline file: %w", err)
+			}
+		} else {
+			_ = os.Remove(tmpPath)
+		}
+	} else {
+		if err := os.Rename(tmpPath, finalPath); err != nil {
+			return fmt.Errorf("failed replacing baseline file: %w", err)
+		}
 	}
-
 	success = true
 	return nil
 }
@@ -169,11 +190,21 @@ func (s *Store) LoadBaseline(name string) (*Baseline, error) {
 	return LoadBaselineFile(path)
 }
 
-// LoadBaselineFile loads a baseline document directly from an arbitrary path.
+// LoadBaselineFile loads a baseline document directly from an arbitrary path, bounded by MaxBaselineBytes.
 func LoadBaselineFile(path string) (*Baseline, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not open baseline file %q: %w", path, err)
+	}
+	defer f.Close()
+
+	limitedReader := io.LimitReader(f, MaxBaselineBytes+1)
+	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("could not read baseline file %q: %w", path, err)
+	}
+	if int64(len(data)) > MaxBaselineBytes {
+		return nil, fmt.Errorf("baseline file %q exceeds maximum allowed limit of %d bytes", path, MaxBaselineBytes)
 	}
 
 	var b Baseline
@@ -190,8 +221,9 @@ func LoadBaselineFile(path string) (*Baseline, error) {
 }
 
 // LoadConfig loads project configuration.
+// LoadConfig loads project configuration bounded by MaxBaselineBytes.
 func (s *Store) LoadConfig() (*Config, error) {
-	data, err := os.ReadFile(s.configFile)
+	f, err := os.Open(s.configFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &Config{
@@ -206,12 +238,21 @@ func (s *Store) LoadConfig() (*Config, error) {
 		}
 		return nil, err
 	}
+	defer f.Close()
+
+	limitedReader := io.LimitReader(f, MaxBaselineBytes+1)
+	data, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, fmt.Errorf("could not read config file %q: %w", s.configFile, err)
+	}
+	if int64(len(data)) > MaxBaselineBytes {
+		return nil, fmt.Errorf("config file %q exceeds maximum allowed limit of %d bytes", s.configFile, MaxBaselineBytes)
+	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("invalid config.json in %q: %w", s.configFile, err)
 	}
-
 	if cfg.SchemaVersion != CurrentSchemaVersion {
 		return nil, fmt.Errorf("unsupported config schema_version %d in %q (supported: %d)",
 			cfg.SchemaVersion, s.configFile, CurrentSchemaVersion)
