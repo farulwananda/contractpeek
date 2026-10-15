@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": {
+    "profile": {
+      "id": "USR-998822",
+      "username": "alexdev",
+      "followers": "14200",
+      "verified": true,
+      "bio": "Building devtools in Go"
+    },
+    "posts": [
+      {
+        "id": "POST-101",
+        "title": "Introduction to Contractpeek",
+        "likes": "520",
+        "tags": ["go", "api", "testing"]
+      }
+    ]
+  }
+}

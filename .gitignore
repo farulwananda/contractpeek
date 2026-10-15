@@ -1,0 +1,21 @@
+# Binaries
+bin/
+dist/
+/contractpeek
+*.exe
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+
+# Test artifacts & temporary files
+*.out
+coverage.html
+test_out/
+/tmp/
+
+# Sensitive samples
+samples/
+testdata/live/
+*_PLAN.md

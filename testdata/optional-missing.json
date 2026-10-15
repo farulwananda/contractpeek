@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "data": {
+    "profile": {
+      "id": "USR-998822",
+      "username": "alexdev",
+      "verified": true
+    },
+    "posts": []
+  }
+}
